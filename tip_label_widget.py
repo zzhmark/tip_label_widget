@@ -3,26 +3,35 @@ import tkinter as tk
 import tkinter.ttk as ttk
 from tkinter import filedialog as fd
 from tkinter import messagebox as mb
+from PIL import Image, ImageTk
 
 #importation from combine tip images
 import SimpleITK as sitk
+import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-#functions
+#global vars
+mainWin = tk.Tk()
 
 mip_dict = {'XY':0, 'XZ':1, 'YZ':2}
 
 button_value = 'XY'
 
-def plot_mip(nrrd, mip_direction=button_value):
-    img = sitk.ReadImage(nrrd)
-    array = sitk.GetArrayFromImage(img)
-    mip = np.max(array, axis=mip_dict[mip_direction.get()])
-    # plt.imshow(mip, cmap='Greys_r')
-    # plt.axis('off')
-    return mip
+radio_value = tk.StringVar()
+
+filelist_value = tk.StringVar()
+
+nrrd_cache = {}
+
+pic_handle = None
+
+# functions
+
+def extract_planes(nrrd):
+    array = sitk.GetArrayFromImage(sitk.ReadImage(nrrd))
+    return np.max(array, axis=0), np.max(array, axis=2), np.max(array, axis=1)
 
 def refresh_controls(flag):
     button_xy['state'] = flag
@@ -36,34 +45,30 @@ def refresh_controls(flag):
     radio_y['state'] = flag
 
 def open_from_dir():
-    temp = fd.askdirectory(title='Open From Dir..', mustexist=True)
-    # print(type(temp))
-    # print(temp)
-    if type(temp) != str or temp == '':
+    dir = fd.askdirectory(title='Open From Dir..', mustexist=True)
+    if type(dir) != str or dir == '':
         return
-    dir = temp
+    global nrrd_cache
     files = os.listdir(dir)
-    # print(files)
-    nrrd_files = []
-    for i in files:
-        if i.endswith('.nrrd'):
-            nrrd_files.append(i)
-    # print(nrrd_files)
-    judge = dict(zip(nrrd_files ,('na',) * len(nrrd_files)))
-    # print(judge)
-    filelist['values'] = tuple(judge.keys())
+    nrrd_cache = dict(zip([i for i in files if i.endswith('.nrrd')], 
+                          [dict(zip(('XY', 'YZ', 'XZ', 'label'), (*extract_planes(nrrd), 'na'))) for nrrd in [os.path.join(dir, i) for i in files if i.endswith('.nrrd')]]))
+    filelist['values'] = tuple(nrrd_cache.keys())
     filelist.set('')
-    if len(judge) > 0:
+    if len(nrrd_cache) > 0:
         refresh_controls('normal')
         filelist.current(0)
     else:
         refresh_controls('disabled')
-    mip = plot_mip(os.path.join(dir, filelist.get()))        
-    view.create_image(image=mip)
-    
-
+#TODO
 def save_lab_as():
     path = fd.asksaveasfilename(title='Save Labels As..', filetypes=[('CSV file ', '*.csv'), ('Excel file', '*.xls;*.xlsx')])
+    if type(path) != str or path == '':
+        return;
+    df = pd.DataFrame(data={'filename': [i for i, j in nrrd_cache.items()], 'judge': [j['label'] for i, j in nrrd_cache.items()]}, index='filename')
+    if path.endswith('.csv'):
+        df.to_csv(path, sep=' ')
+    elif path.endswith('.xls') or path.endswith('.xlsx'):
+        df.to_excel(path, sep=' ')
 
 def about():
     mb.showinfo(title='About Tip Label Tool', message='Developed by ZZH for tip quality control')
@@ -72,16 +77,33 @@ def doc():
     mb.showerror(title='TUDO', message='so sad')
 
 def turn_plane(plane):
+    global button_value
     button_value = plane
-    mip = plot_mip(os.path.join(dir, filelist.get()))        
-    
-def switch():
-    pass
+    repaint()
 
-def judgement(ans):
+def radio_update(*arg):
+    if filelist_value.get() != '':
+        radio_value.set(nrrd_cache[filelist_value.get()]['label'])
+
+def switch(direction):
+    filelist.current(min(max(filelist.current() + direction, 0), len(nrrd_cache) - 1))
+    radio_update()
+
+def judge():
+    nrrd_cache[filelist_value.get()]['label'] = radio_value.get()
+
+def repaint(*args):
+    if filelist_value.get() != '':
+        global pic_handle
+        temp = Image.fromarray(nrrd_cache[filelist_value.get()][button_value])
+        view.delete('all')
+        pic_handle = ImageTk.PhotoImage(temp.resize(size=(min(view.winfo_width(), temp.width * view.winfo_height() // temp.height), min(view.winfo_height(), temp.height * view.winfo_width() // temp.width)), resample=Image.BICUBIC))
+        view.create_image(view.winfo_width() // 2, view.winfo_height() // 2, image=pic_handle)
+
+filelist_value.trace_add(mode='write', callback=repaint)
+filelist_value.trace_add(mode='write', callback=radio_update)
 
 # mainwindow
-mainWin = tk.Tk()
 mainWin.title('Tip Label Tool')
 scr_size = mainWin.winfo_screenwidth(), mainWin.winfo_screenheight()
 mainWin.geometry('%dx%d+%d+%d' % (scr_size[0] // 2, scr_size[1] // 2, scr_size[0] // 4, scr_size[1] // 4))
@@ -102,9 +124,9 @@ helpmenu.add_command(label='Documentation', command=doc)
 frame_up = tk.LabelFrame(mainWin, text='Plane Panel', height=scr_size[1] // 10)
 frame_up.pack(fill='x', expand='no', padx=10, pady=10)
 frame_up.pack_propagate(0)
-button_xy = tk.Button(frame_up, text='XY', command=lambda:turn_plane('XY'), font='Helvetica %d bold' % (scr_size[1] // 32), state='disabled')
-button_yz = tk.Button(frame_up, text='YZ', command=lambda:turn_plane('YZ'), font='Helvetica %d bold' % (scr_size[1] // 32), state='disabled')
-button_xz = tk.Button(frame_up, text='XZ', command=lambda:turn_plane('XZ'), font='Helvetica %d bold' % (scr_size[1] // 32), state='disabled')
+button_xy = tk.Button(frame_up, text='XY', command=lambda : turn_plane('XY'), font='Helvetica %d bold' % (scr_size[1] // 32), state='disabled')
+button_yz = tk.Button(frame_up, text='YZ', command=lambda : turn_plane('YZ'), font='Helvetica %d bold' % (scr_size[1] // 32), state='disabled')
+button_xz = tk.Button(frame_up, text='XZ', command=lambda : turn_plane('XZ'), font='Helvetica %d bold' % (scr_size[1] // 32), state='disabled')
 button_xy.pack(side='left', expand='yes', fill='both', padx=10, pady=10)
 button_xz.pack(side='right', expand='yes', fill='both', padx=10, pady=10)
 button_yz.pack(side='left', expand='yes', fill='both', pady=10)
@@ -122,11 +144,12 @@ frame_canvas.pack(side='left', expand='yes', fill='both')
 frame_left.pack_propagate(0)
 frame_right.pack_propagate(0)
 frame_canvas.pack_propagate(0)
-button_left = tk.Button(frame_left, text='<', command=switch, font='Helvetica %d bold' % (scr_size[1] // 16), state='disabled')
-button_right = tk.Button(frame_right, text='>', command=switch, font='Helvetica %d bold' % (scr_size[1] // 16), state='disabled')
+button_left = tk.Button(frame_left, text='<', command=lambda : switch(-1), font='Helvetica %d bold' % (scr_size[1] // 16), state='disabled')
+button_right = tk.Button(frame_right, text='>', command=lambda : switch(1), font='Helvetica %d bold' % (scr_size[1] // 16), state='disabled')
 button_left.pack(expand='yes', fill='both')
 button_right.pack(expand='yes', fill='both')
 view = tk.Canvas(frame_canvas)
+view.bind('<Configure>', repaint)
 view.pack(expand='yes', fill='both')
 
 # downer
@@ -135,14 +158,13 @@ frame_down.pack(side='bottom', fill='x', expand='no', anchor='s', padx=10, pady=
 frame_down.pack_propagate(0)
 combolabel = tk.Label(frame_down, text='Sorted .nrrd files: ', font=('Arial', scr_size[1] // 80))
 combolabel.pack(side='left', padx=10)
-filelist = ttk.Combobox(frame_down, width=scr_size[0], state='readonly')
+filelist = ttk.Combobox(frame_down, width=scr_size[0], state='readonly', textvariable=filelist_value)
 button_open = tk.Button(frame_down, text='Open', command=open_from_dir)
 button_save = tk.Button(frame_down, text='Save', command=save_lab_as, state='disabled')
 button_save.pack(side='right', padx=10, fill='y', pady=10)
-radio_value = tk.StringVar()
-radio_y = tk.Radiobutton(frame_down, text='YES', state='disabled', font=('Arial', scr_size[1] // 80), command=lambda:judgement('y'), value='y', variable=radio_value)
-radio_n = tk.Radiobutton(frame_down, text='NO', state='disabled', font=('Arial', scr_size[1] // 80), command=lambda:judgement('n'), value='n', variable=radio_value)
-radio_na = tk.Radiobutton(frame_down, text='N/A', state='disabled', font=('Arial', scr_size[1] // 80), command=lambda:judgement('na'), value='na', variable=radio_value)
+radio_y = tk.Radiobutton(frame_down, text='YES', state='disabled', font=('Arial', scr_size[1] // 80), command=judge, value='y', variable=radio_value)
+radio_n = tk.Radiobutton(frame_down, text='NO', state='disabled', font=('Arial', scr_size[1] // 80), command=judge, value='n', variable=radio_value)
+radio_na = tk.Radiobutton(frame_down, text='N/A', state='disabled', font=('Arial', scr_size[1] // 80), command=judge, value='na', variable=radio_value)
 radio_na.pack(side='right', expand='yes', padx=10, pady=10)
 radio_n.pack(side='right', expand='yes', padx=10, pady=10)
 radio_y.pack(side='right', expand='yes', padx=10, pady=10)
