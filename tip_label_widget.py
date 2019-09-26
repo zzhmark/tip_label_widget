@@ -63,8 +63,8 @@ def open_from_dir():
 def save_lab_as():
     path = fd.asksaveasfilename(title='Save Labels As..', filetypes=[('CSV file ', '*.csv'), ('Excel file', '*.xls;*.xlsx')])
     if type(path) != str or path == '':
-        return;
-    df = pd.DataFrame(data={'filename': [i for i, j in nrrd_cache.items()], 'judge': [j['label'] for i, j in nrrd_cache.items()]}, index='filename')
+        return
+    df = pd.DataFrame(np.array([(i, j['label']) for i, j in nrrd_cache.items()]), columns=['filename', 'label']).set_index('filename')
     if path.endswith('.csv'):
         df.to_csv(path, sep=' ')
     elif path.endswith('.xls') or path.endswith('.xlsx'):
