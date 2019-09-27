@@ -29,7 +29,7 @@ pic_handle = None
 
 # functions
 
-def extract_planes(nrrd):
+def extract_planes(nrrd, eswc=None):
     array = sitk.GetArrayFromImage(sitk.ReadImage(nrrd))
     return np.max(array, axis=0), np.max(array, axis=2), np.max(array, axis=1)
 
@@ -50,8 +50,12 @@ def open_from_dir():
         return
     global nrrd_cache
     files = os.listdir(dir)
-    nrrd_cache = dict(zip([i for i in files if i.endswith('.nrrd')], 
-                          [dict(zip(('XY', 'YZ', 'XZ', 'label'), (*extract_planes(nrrd), 'na'))) for nrrd in [os.path.join(dir, i) for i in files if i.endswith('.nrrd')]]))
+    #TODO
+    nrrd = {}
+    for i in files:
+        if i.endswith('.nrrd'):
+            nrrd[i] = i.split('.')[0] + '.eswc' if os.path.exists(i.split('.')[0] + '.eswc') else ''
+    nrrd_cache = dict(zip(nrrd.keys(), dict(zip(('XY', 'YZ', 'XZ', 'mask', 'label'), (*extract_planes(i), 'na') for i in nrrd.items()))))
     filelist['values'] = tuple(nrrd_cache.keys())
     filelist.set('')
     if len(nrrd_cache) > 0:
@@ -59,7 +63,7 @@ def open_from_dir():
         filelist.current(0)
     else:
         refresh_controls('disabled')
-#TODO
+
 def save_lab_as():
     path = fd.asksaveasfilename(title='Save Labels As..', filetypes=[('CSV file ', '*.csv'), ('Excel file', '*.xls;*.xlsx')])
     if type(path) != str or path == '':
