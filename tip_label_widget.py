@@ -29,9 +29,23 @@ pic_handle = None
 
 # functions
 
-def extract_planes(nrrd, eswc=None):
-    array = sitk.GetArrayFromImage(sitk.ReadImage(nrrd))
-    return np.max(array, axis=0), np.max(array, axis=2), np.max(array, axis=1)
+def extract_planes(dir, nrrd, eswc):
+    array = sitk.GetArrayFromImage(sitk.ReadImage(os.path.join(dir, nrrd)))
+    if eswc == None:
+        mask = None
+    else:
+        n_skip = 0
+        with open(os.path.join(dir, eswc), "r") as f:
+            for line in f.readlines():
+                line = line.strip()
+                if line.startswith("#"):
+                    n_skip += 1
+                else:
+                    break
+        f.close()
+        names = ["##n", "X", "Y", "Z", "parent"]
+        mask = pd.read_csv(os.path.join(dir, eswc), index_col=0, skiprows=n_skip, sep=" ", usecols=[0, 2, 3, 4, 6], names=names)
+    return np.max(array, axis=0), np.max(array, axis=2), np.max(array, axis=1), mask, 'na'
 
 def refresh_controls(flag):
     button_xy['state'] = flag
@@ -54,8 +68,10 @@ def open_from_dir():
     nrrd = {}
     for i in files:
         if i.endswith('.nrrd'):
-            nrrd[i] = i.split('.')[0] + '.eswc' if os.path.exists(i.split('.')[0] + '.eswc') else ''
-    nrrd_cache = dict(zip(nrrd.keys(), dict(zip(('XY', 'YZ', 'XZ', 'mask', 'label'), (*extract_planes(i), 'na') for i in nrrd.items()))))
+            nrrd[i] = i.split('.')[0] + '.eswc'
+            if not os.path.exists(os.path.join(dir, nrrd[i])):
+                nrrd[i] = None
+    nrrd_cache = dict(zip(nrrd.keys(), [dict(zip( ('XY', 'YZ', 'XZ', 'mask', 'label'), extract_planes(dir, *i) )) for i in nrrd.items()] ))
     filelist['values'] = tuple(nrrd_cache.keys())
     filelist.set('')
     if len(nrrd_cache) > 0:
@@ -99,11 +115,20 @@ def judge():
 def repaint(*args):
     if filelist_value.get() != '':
         global pic_handle
-        temp = Image.fromarray(nrrd_cache[filelist_value.get()][button_value])
+        nrrd = nrrd_cache[filelist_value.get()]
+        temp = Image.fromarray(nrrd[button_value])
         view.delete('all')
-        pic_handle = ImageTk.PhotoImage(temp.resize(size=(min(view.winfo_width(), temp.width * view.winfo_height() // temp.height), min(view.winfo_height(), temp.height * view.winfo_width() // temp.width)), resample=Image.BICUBIC))
-        view.create_image(view.winfo_width() // 2, view.winfo_height() // 2, image=pic_handle)
-
+        bias = view.winfo_width() // 2, view.winfo_height() // 2
+        ratio = min(view.winfo_height() / temp.height, view.winfo_width() / temp.width)
+        pic_handle = ImageTk.PhotoImage(temp.resize(size=(int(temp.width * ratio), int(temp.height * ratio)), resample=Image.BICUBIC))
+        view.create_image(*bias, image=pic_handle)
+        if nrrd['mask'] is not None:
+            bias = bias[0] - temp.width * ratio // 2, bias[1] - temp.height * ratio // 2
+            for index, row in nrrd['mask'].iterrows():
+                if row['parent'] in nrrd['mask'].index:
+                    view.create_line(*tuple([int(ratio * i + j) for i, j in zip(row[list(button_value)], bias)]),
+                                     *tuple([int(ratio * i + j) for i, j in zip(nrrd['mask'].loc[row['parent'], list(button_value)], bias)]), 
+                                     fill='green')
 filelist_value.trace_add(mode='write', callback=repaint)
 filelist_value.trace_add(mode='write', callback=radio_update)
 
