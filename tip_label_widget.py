@@ -13,7 +13,11 @@ import matplotlib.pyplot as plt
 import os, shutil
 
 #global vars
-axi_color = {'X':'red', 'Y':'green', 'Z':'blue'}
+axi_color = {'X':'#f00', 'Y':'#0f0', 'Z':'#00f'}
+
+plane_to_no = {'XY':0, 'YZ':1, 'XZ':2}
+
+no_to_plane = ('XY', 'YZ', 'XZ')
 
 mainWin = tk.Tk()
 
@@ -161,15 +165,14 @@ def repaint(*args):
             for index, row in nrrd['mask'].iterrows():
                 if row['parent'] in nrrd['mask'].index:
                     view.create_line(*tuple([int(ratio * i + j) for i, j in zip(row[list(btn_value)], bias_tl)]),
-
                                      *tuple([int(ratio * i + j) for i, j in zip(nrrd['mask'].loc[row['parent'], list(btn_value)], bias_tl)]), 
-                                     fill='purple', width=2)
+                                     fill='#fb0', width=2)
             view.create_text(bias_tl, text='#%d'%(combolist.current() + 1), fill='white', anchor='nw')
 
 def save_lab_as(*arg):
     if len(cache) == 0:
         return
-    path = fd.asksaveasfilename(title='Save Labels As..', filetypes=[('CSV file ', '*.csv'), ('Excel file', '*.xls;*.xlsx')])
+    path = fd.asksaveasfilename(title='Save Labels As..', filetypes=[('CSV file ', '*.csv'), ('Excel file', '*.xls;*.xlsx')], defaultextension='*.*')
     if type(path) != str or path == '':
         return
     df = pd.DataFrame(np.array([(i, j['label']) for i, j in cache.items()]), columns=['filename', 'label']).set_index('filename')
@@ -200,6 +203,14 @@ def switch(direction):
     lf_btn_update()
     radio_update()
 
+def switch_key(event):
+    if event.widget is combolist or type(event.widget) == str and 'combobox' in event.widget:
+        return
+    if event.keysym == 'Up':
+        switch(-1)
+    elif event.keysym == 'Down':
+        switch(1)
+
 def turn_plane(plane):
     global btn_value
     btn_value = plane
@@ -207,6 +218,29 @@ def turn_plane(plane):
         j.state(['!pressed', '!disabled'])
     btn[plane].state(['pressed', 'disabled'])
     repaint()
+
+def turn_plane_key(event):
+    if len(cache) == 0:
+        return
+    if event.keysym == 'Right':
+        if btn_value == 'XZ':
+            return
+        turn_plane(no_to_plane[min(plane_to_no[btn_value] + 1, 2)])
+    elif event.keysym == 'Left':
+        if btn_value == 'XY':
+            return
+        turn_plane(no_to_plane[max(plane_to_no[btn_value] - 1, 0)])
+
+def label_key(event):
+    if len(cache) == 0:
+        return
+    if event.keysym == '1':
+        radio_var.set('y')
+    elif event.keysym == '2':
+        radio_var.set('n')
+    elif event.keysym == '3':
+        radio_var.set('na')
+    judge()
 
 # mainwindow
 mainWin.title('Tip Label Tool')
@@ -298,6 +332,13 @@ mainWin.bind('<Control-s>', save_lab_as)
 mainWin.bind('<Control-S>', save_lab_as)
 mainWin.bind('<Control-v>', display_on_v3d)
 mainWin.bind('<Control-V>', display_on_v3d)
+mainWin.bind('<Up>', switch_key)
+mainWin.bind('<Down>', switch_key)
+mainWin.bind('<Left>', turn_plane_key)
+mainWin.bind('<Right>', turn_plane_key)
+mainWin.bind('1', label_key)
+mainWin.bind('2', label_key)
+mainWin.bind('3', label_key)
 
 mainWin.config(menu=menubar)
 mainWin.mainloop()
