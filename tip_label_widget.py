@@ -51,9 +51,9 @@ def display_on_v3d(*arg):
     if not os.path.exists(ano):
         mb.showerror(title='ERROR', message=".ano for Vaa3D viewer doesn't exist in the temp folder.")
         return
-    if path_v3d == '' or os.system(cmd(path_v3d + ' -i ' + ano)) != 0:
-        if os.system(cmd('vaa3d -i ' + ano)) != 0:
-            if os.system(cmd('vaa3d_msvc -i ' + ano)) != 0:
+    if path_v3d == '' or os.system(cmd(path_v3d + ' ' + ano)) != 0:
+        if os.system(cmd('vaa3d ' + ano)) != 0:
+            if os.system(cmd('vaa3d_msvc ' + ano)) != 0:
                 mb.showerror(title='Vaa3D Not Found', 
                              message="Vaa3D executable isn't found in either the environment or the path specified.\n"
                              "Please specify a proper path or add an environment path directing to an executable with a proper name.")
