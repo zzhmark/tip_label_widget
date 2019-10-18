@@ -4,17 +4,87 @@ import tkinter.ttk as ttk
 from tkinter import filedialog as fd
 from tkinter import messagebox as mb
 from PIL import Image, ImageTk
-
-#importation from combine tip images
 import SimpleITK as sitk
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import threading
 
-class tip_label_widget(tk.Tk):
+lock = threading.RLock()
+
+class progress_popup(tk.Toplevel):
     
-    #class constant
+    def __init__(self, master, text=''):
+        self._flag = True
+        tk.Toplevel.__init__(self, master=master)
+        self.geometry('%dx%d+%d+%d' % (master.winfo_screenwidth() // 4, 
+                                        master.winfo_screenwidth() // 16, 
+                                        master.winfo_rootx() + master.winfo_width() // 2 - master.winfo_screenwidth() // 8, 
+                                        master.winfo_rooty() + master.winfo_height() // 2 - master.winfo_screenwidth() // 32
+                                        )
+                        )
+        self.attributes('-topmost', True)
+        self.resizable(width=False, height=False)
+        label = tk.Label(self, text=text)
+        self._probar = ttk.Progressbar(self, 
+                                        length = master.winfo_screenwidth(), 
+                                        mode='determinate', 
+                                        orient='horizontal'
+                                        )
+        self._probar['value'] = 0
+        label.pack(padx=20, pady=20)
+        self._probar.pack(padx=20, pady=20)
+        self.grab_set()
+
+    def maximum(self, max):
+        self._probar['maximum'] = max
+
+    def step(self):
+        self._probar.step()
+        self._probar.update()
+    
+    def destroy(self):
+        lock.acquire()
+        self._flag = False
+        lock.release()
+        super().destroy()
+
+class type_dialog(tk.Toplevel):
+
+    def __init__(self, master=None, title='', types=('NULL',)):
+        tk.Toplevel.__init__(self, master=master)
+        self.attributes('-topmost', True)
+        self.resizable(width=False, height=False)
+        self._label = tk.Label(self, text='Please choose a(n) '+title+' type: ')
+        self._typelist = ttk.Combobox(self, 
+                                        width=self.winfo_width(), 
+                                        state='readonly', 
+                                        )
+        self._typelist['value'] = types
+        self._typelist.current(0)
+        self._btn = tk.Button(self,
+                                text='OK', 
+                                command=self._ok, 
+                                )
+        self._label.pack(fill='both', padx=20, pady=10)
+        self._typelist.pack(fill='both', padx=20)
+        self._btn.pack(fill='both', padx=20, pady=10)
+        self.geometry('%dx%d+%d+%d' % (master.winfo_screenwidth() // 8, 
+                                        master.winfo_screenwidth() // 16, 
+                                        master.winfo_rootx() + master.winfo_width() // 2 - master.winfo_screenwidth() // 16, 
+                                        master.winfo_rooty() + master.winfo_height() // 2 - master.winfo_screenwidth() // 32
+                                        )
+                        )
+        self.grab_set()
+        self._type = None
+    
+    def _ok(self):
+        self._type = self._typelist.get()
+        self.destroy()
+
+class BLW(tk.Tk):
+    #class members
     _axis_color = {'X':'#f00', 'Y':'#0f0', 'Z':'#00f'}
     _plane_to_no = {'XY':0, 'YZ':1, 'XZ':2}
     _no_to_plane = 'XY', 'YZ', 'XZ'
@@ -24,18 +94,20 @@ class tip_label_widget(tk.Tk):
         #object vars
         self._btn_value = 'XY'
         self._radio_var = tk.StringVar()
+        self._check_var = tk.BooleanVar()
         self._combolist_text = tk.StringVar()
         self._cache = {}
         self._pic_handle = None
         self._path_v3d = ''
         self._dir = None
-        self._load_label_text = tk.StringVar()
         self._btn = {}
         self._radio = {}
         self._menu = {}
+        self._rawtype = None
+        self._masktype = None
         frame = {}
         # mainwindow
-        self.title('Tip Label Tool')
+        self.title('Batch Label Widget')
         style = ttk.Style(self)
         scrw, scrh = self.winfo_screenwidth(), self.winfo_screenheight()
         style.configure('XYZ.TButton', 
@@ -55,14 +127,14 @@ class tip_label_widget(tk.Tk):
         menubar.add_cascade(label='Tool', menu=self._menu['tool'])
         menubar.add_cascade(label='Help', menu=self._menu['help'])
         self._menu['file'].add_command(label='Open a dir..', 
-                                    command=self._open_dir, 
-                                    accelerator='Ctrl+O'
-                                    )
+                                        command=self._open_dir, 
+                                        accelerator='Ctrl+O'
+                                        )
         self._menu['file'].add_command(label='Save labels as..', 
-                                    command=self._save_as, 
-                                    state='disabled', 
-                                    accelerator='Ctrl+S'
-                                    )
+                                        command=self._save_as, 
+                                        state='disabled', 
+                                        accelerator='Ctrl+S'
+                                        )
         self._menu['file'].add_separator()
         self._menu['file'].add_command(label='Exit', command=self.destroy)
         self._menu['tool'].add_command(label='Set Vaa3D path..', command=self._set_v3d_path)
@@ -70,7 +142,7 @@ class tip_label_widget(tk.Tk):
                                         command=self._display_on_v3d, 
                                         accelerator='Ctrl+V'
                                         )
-        self._menu['help'].add_command(label='About', command=tip_label_widget._about)
+        self._menu['help'].add_command(label='About', command=BLW._about)
         self.config(menu=menubar)
         # upper
         frame['up'] = tk.LabelFrame(self, 
@@ -147,11 +219,11 @@ class tip_label_widget(tk.Tk):
         frame['right'].pack_propagate(0)
         frame['canvas'].pack_propagate(0)
         self._btn['left'] = ttk.Button(frame['left'], 
-                                    text='<', 
-                                    command=lambda : self._switch(-1), 
-                                    style='LF.TButton', 
-                                    state='disabled'
-                                    )
+                                        text='<', 
+                                        command=lambda : self._switch(-1), 
+                                        style='LF.TButton', 
+                                        state='disabled'
+                                        )
         self._btn['right'] = ttk.Button(frame['right'], 
                                         text='>', 
                                         command=lambda : self._switch(1), 
@@ -176,7 +248,7 @@ class tip_label_widget(tk.Tk):
                             )
         frame['down'].pack_propagate(0)
         combolabel = tk.Label(frame['down'], 
-                                text='Sorted .nrrd files: ', 
+                                text='Samples: ', 
                                 font=('Arial', scrh//80)
                                 )
         combolabel.pack(side='left', padx=10)
@@ -186,87 +258,84 @@ class tip_label_widget(tk.Tk):
                                         textvariable=self._combolist_text
                                         )
         self._btn['open'] = tk.Button(frame['down'], 
-                                text='Open', 
-                                command=self._open_dir
-                                )
+                                        text='Open', 
+                                        command=self._open_dir
+                                        )
         self._btn['save'] = tk.Button(frame['down'], 
-                                text='Save', 
-                                command=self._save_as, 
-                                state='disabled'
-                                )
+                                        text='Save', 
+                                        command=self._save_as, 
+                                        state='disabled'
+                                        )
         self._btn['save'].pack(side='right', 
-                        padx=10, 
-                        fill='y', 
-                        pady=10
-                        )
+                                padx=10, 
+                                fill='y', 
+                                pady=10
+                                )
         self._radio['y'] = tk.Radiobutton(frame['down'], 
-                                    text='YES', 
-                                    state='disabled', 
-                                    font=('Arial', scrh//80), 
-                                    command=self._judge, 
-                                    value='y', 
-                                    variable=self._radio_var
-                                    )
-        self._radio['n'] = tk.Radiobutton(frame['down'], 
-                                    text='NO', 
-                                    state='disabled', 
-                                    font=('Arial', scrh//80), 
-                                    command=self._judge, 
-                                    value='n', 
-                                    variable=self._radio_var
-                                    )
-        self._radio['na'] = tk.Radiobutton(frame['down'], 
-                                    text='N/A', 
-                                    state='disabled', 
-                                    font=('Arial', 
-                                    scrh // 80), 
-                                    command=self._judge, 
-                                    value='na', 
-                                    variable=self._radio_var
-                                    )
-        self._radio['na'].pack(side='right', 
-                        expand='yes', 
-                        padx=10, 
-                        pady=10
-                        )
-        self._radio['n'].pack(side='right', 
-                        expand='yes', 
-                        padx=10, 
-                        pady=10
-                        )
-        self._radio['y'].pack(side='right', 
-                        expand='yes', 
-                        padx=10, 
-                        pady=10
-                        )
-        self._btn['open'].pack(side='right', 
-                        padx=10, 
-                        fill='y', 
-                        pady=10
-                        )
-        self._combolist.pack(side='left', 
-                            fill='y', 
-                            pady=10
-                            )
-        # popup
-        self._load_pop = tk.Toplevel(self)
-        self._load_pop.withdraw()
-        self._load_pop.overrideredirect(True)
-        self._load_pop.attributes('-topmost', True)
-        self._load_pop.resizable(width=False, height=False)
-        load_label = tk.Label(self._load_pop, textvariable=self._load_label_text)
-        self._load_pro = ttk.Progressbar(self._load_pop, 
-                                            length=scrw // 4, 
-                                            mode='determinate', 
-                                            orient='horizontal'
+                                            text='YES', 
+                                            state='disabled', 
+                                            font=('Arial', scrh//80), 
+                                            command=self._judge, 
+                                            value='y', 
+                                            variable=self._radio_var
                                             )
-        load_label.pack(padx=20, pady=20)
-        self._load_pro.pack(padx=20, pady=20)
+        self._radio['n'] = tk.Radiobutton(frame['down'], 
+                                            text='NO', 
+                                            state='disabled', 
+                                            font=('Arial', scrh//80), 
+                                            command=self._judge, 
+                                            value='n', 
+                                            variable=self._radio_var
+                                            )
+        self._radio['na'] = tk.Radiobutton(frame['down'], 
+                                            text='N/A', 
+                                            state='disabled', 
+                                            font=('Arial', scrh//80), 
+                                            command=self._judge, 
+                                            value='na', 
+                                            variable=self._radio_var
+                                            )
+        self._check_surf = tk.Checkbutton(frame['down'], 
+                                            text='Show surface', 
+                                            state='disabled', 
+                                            font=('Arial', scrh//80), 
+                                            variable=self._check_var
+                                            )
+        self._radio['na'].pack(side='right', 
+                                expand='yes', 
+                                padx=10, 
+                                pady=10
+                                )
+        self._radio['n'].pack(side='right', 
+                                expand='yes', 
+                                padx=10, 
+                                pady=10
+                                )
+        self._radio['y'].pack(side='right', 
+                                expand='yes', 
+                                padx=10, 
+                                pady=10
+                                )
+        self._check_surf.pack(side='right', 
+                                expand='yes', 
+                                padx=10, 
+                                pady=10
+                                )
+        self._btn['open'].pack(side='right', 
+                                padx=10, 
+                                fill='y', 
+                                pady=10
+                                )
+        self._combolist.pack(side='left', 
+                                fill='y', 
+                                pady=10
+                                )
         # tracing and binding
         self._combolist_text.trace_add(mode='write', callback=self._repaint)
         self._combolist_text.trace_add(mode='write', callback=self._radio_update)
         self._combolist_text.trace_add(mode='write', callback=self._lf_btn_update)
         self._radio_var.trace_add(mode='write', callback=self._repaint_label)
+        self._check_var.trace_add(mode='write', callback=self._repaint)
         self._view.bind('<Configure>', self._repaint)
         self.bind('<MouseWheel>', self._scroll)
         self.bind('<Button-4>', self._scroll)
@@ -295,41 +364,48 @@ class tip_label_widget(tk.Tk):
         self.bind('K', self._key_label)
         self.bind('L', self._key_label)
 
-
-
-    # static functions
-    def _about():
-        mb.showinfo(title='About Tip Label Tool', message='Developed by ZZH for tip quality control')
+    @classmethod
+    def _about(cls):
+        mb.showinfo(title='About Batch Label Widget', message='Developed by ZZH for tip quality control')
     
-    def _extract_eswc(eswc):
-        if os.path.exists(eswc):
-            n_skip = 0
-            with open(eswc, "r") as f:
-                for line in f.readlines():
-                    line = line.strip()
-                    if line.startswith("#"):
-                        n_skip += 1
-                    else:
-                        break
-            names = ["##n", "X", "Y", "Z", "parent"]
-            return pd.read_csv(eswc, index_col=0, skiprows=n_skip, sep=" ", usecols=[0, 2, 3, 4, 6], names=names)
-        else:
+    @classmethod
+    def _extract_mask(cls, mask, masktype):
+        if not os.path.exists(mask + masktype):
             return None
+        n_skip = 0
+        with open(mask + masktype, "r") as f:
+            for line in f.readlines():
+                line = line.strip()
+                if line.startswith("#"):
+                    n_skip += 1
+                else:
+                    break
+        names = ["##n", "X", "Y", "Z", "parent"]
+        return pd.read_csv(mask + masktype, index_col=0, skiprows=n_skip, sep=" ", usecols=[0, 2, 3, 4, 6], names=names)
 
-    def _extract_nrrd(nrrd):
-        array = sitk.GetArrayFromImage(sitk.ReadImage(nrrd))
+    @classmethod
+    def _extract_raw(cls, raw, rawtype):
+        img = sitk.ReadImage(raw + rawtype)
+        if rawtype == '.tif':
+            img = sitk.Flip(img, (False, True, False))
+        array = sitk.GetArrayFromImage(img)
+        # if len(array.shape) == 3:
         return np.max(array, axis=0), np.max(array, axis=2), np.max(array, axis=1)
+        # else:
+            # return array, np.zeros(array.shape), np.zeros(array.shape)
 
-    # object functions
+    def _ask_filetype(self, title, types):
+        pop = type_dialog(self, title,  types)
+        self.wait_window(pop)
+        return pop._type
+        
     def _display_on_v3d(self):
         if self._combolist_text.get() == '':
             return
         filename = os.path.join(self._dir, self._combolist_text.get())
         with open(filename + '.ano', 'w') as ano:
-            ano.write('SWCFILE=' + filename + '.eswc' + '\nRAWIMG=' + filename + '.nrrd')
+            ano.write('SWCFILE=' + filename + self._masktype + '\nRAWIMG=' + filename + self._rawtype)
             ano.close()
-            print(ano.name)
-            print(self._path_v3d)
             try:
                 if self._path_v3d == '':
                     raise
@@ -351,8 +427,7 @@ class tip_label_widget(tk.Tk):
 
     def _key_label(self, event):
         if event.state & 5 > 0 or \
-            len(self._cache) == 0 or \
-                self._load_pop.grab_status() is not None:
+            len(self._cache) == 0:
             return
         if event.keysym in ('1', 'j', 'J'):
             self._radio_var.set('y')
@@ -368,20 +443,17 @@ class tip_label_widget(tk.Tk):
 
     def _key_save(self, event):
         if event.state & 1 == 0 or \
-            len(self._cache) == 0 or \
-                self._load_pop.grab_status() is not None:
+            len(self._cache) == 0:
             self._save_as()
 
     def _key_v3d(self, event):
         if event.state & 1 == 0 or \
-            len(self._cache) == 0 or \
-                self._load_pop.grab_status() is not None:
+            len(self._cache) == 0:
             self._display_on_v3d()
     
     def _key_switch(self, event):
         if event.state & 5 > 0 or \
             len(self._cache) == 0 or \
-                self._load_pop.grab_status() is not None or \
                     event.widget is self._combolist or \
                         type(event.widget) == str and 'combobox' in event.wdiget:
             return
@@ -392,8 +464,7 @@ class tip_label_widget(tk.Tk):
 
     def _key_turn_plane(self, event):
         if event.state & 5 > 0 or \
-            len(self._cache) == 0 or \
-            self._load_pop.grab_status() is not None:
+            len(self._cache) == 0:
             return
         if event.keysym in ('Right', 'd', 'D'):
             if self._btn_value != 'XZ':
@@ -414,37 +485,60 @@ class tip_label_widget(tk.Tk):
         else:
             self._btn['right'].state(['!disabled'])
 
+    def _load_files(self, dir, rawtype, masktype):
+        pop = progress_popup(self, 'Loading from ' + dir + '..')
+        lock.acquire()
+        if not pop._flag:
+            return None
+        cache = {i.replace(rawtype,''): dict.fromkeys(('XY','YZ','XZ','mask','label')) 
+                    for i in os.listdir(dir) if i.endswith(rawtype)
+                    }
+        pop.maximum(len(cache) + 1)
+        lock.release()
+        for i, j in cache.items():
+            lock.acquire()
+            if not pop._flag:
+                return None
+            j['XY'], j['YZ'], j['XZ'] = BLW._extract_raw(os.path.join(dir, i), rawtype)
+            j['mask'] = BLW._extract_mask(os.path.join(dir, i), masktype)
+            j['label'] = ''
+            pop.step()
+            lock.release()
+        lock.acquire()
+        if not pop._flag:
+            return None
+        pop.destroy()
+        lock.release()
+        return cache
+
     def _open_dir(self):
         temp = fd.askdirectory(title='Open a Directory..', mustexist=True)
         if type(temp) != str or temp == '' or len(self._cache) != 0 and \
             not mb.askokcancel(title='Continue?', message='Current cache will be overwritten.'):
             return
-        self._load_pop.grab_set()
-        self._load_label_text.set('Loading from ' + temp + '..')
-        self._load_pro['value'] = 0
-        self._load_pop.deiconify()
-        self._dir = temp
-        self._cache = {i.replace('.nrrd',''): dict.fromkeys(('XY','YZ','XZ','mask','label')) 
-                        for i in os.listdir(temp) if i.endswith('.nrrd')
-                        }
-        self._load_pro['maximum'] = len(self._cache) + 1
-        for i, j in self._cache.items():
-            j['XY'], j['YZ'], j['XZ'] = tip_label_widget._extract_nrrd(os.path.join(temp, i+'.nrrd'))
-            j['mask'] = tip_label_widget._extract_eswc(os.path.join(temp, i+'.eswc'))
-            j['label'] = ''
-            self._load_pro.step()
-            self._load_pro.update()
-        self._combolist['values'] = tuple(self._cache.keys())
+        rawtype = self._ask_filetype('raw image type', ('.tif', '.nrrd'))
+        if rawtype is None:
+            return
+        masktype = self._ask_filetype('mask type', ('.eswc', '.swc'))
+        if rawtype is None:
+            return
+        cache = self._load_files(temp, rawtype, masktype)
+        if cache is None:
+            return
+        self._combolist['values'] = tuple(cache.keys())
         self._combolist.set('')
-        if len(self._cache) > 0:
+        self._dir = temp
+        self._cache = cache
+        if len(cache) > 0:
+            self._rawtype = rawtype
+            self._masktype = masktype
             self._refresh_controls('normal')
             self._combolist.current(0)
             self._lf_btn_update()
         else:
             self._refresh_controls('disabled')
             self._pic_handle = None
-        self._load_pop.withdraw()
-        self._load_pop.grab_release()
+        self._check_var.set(True)
 
     def _radio_update(self, *arg):
         if self._combolist_text.get() != '':
@@ -460,16 +554,17 @@ class tip_label_widget(tk.Tk):
         self._radio['n']['state'] = flag
         self._radio['na']['state'] = flag
         self._radio['y']['state'] = flag
+        self._check_surf['state'] = flag
         self._menu['file'].entryconfig(1, state=flag)
         self._menu['tool'].entryconfig(1, state=flag)
         self._btn[self._btn_value].state(['pressed', 'disabled'])
 
     def _repaint(self, *arg):
-        self._view.delete('img', 'axis', 'mask', 'all')
+        self._view.delete('all')
         if self._combolist_text.get() == '':
             return
-        nrrd = self._cache[self._combolist_text.get()]
-        temp = Image.fromarray(nrrd[self._btn_value])
+        raw = self._cache[self._combolist_text.get()]
+        temp = Image.fromarray(raw[self._btn_value])
         view_w, view_h = self._view.winfo_width(), self._view.winfo_height()
         bias_center = view_w // 2, \
                         view_h // 2
@@ -489,7 +584,7 @@ class tip_label_widget(tk.Tk):
                                 bias_center[1], 
                                 bias_tl[0] + paint_size[0], 
                                 bias_center[1], 
-                                fill=tip_label_widget._axis_color[self._btn_value[0]], 
+                                fill=BLW._axis_color[self._btn_value[0]], 
                                 width=1, 
                                 arrow='last', 
                                 arrowshape='%d %d %d'%(paint_size[0]//200, paint_size[0]//100, paint_size[0]//200), 
@@ -508,7 +603,7 @@ class tip_label_widget(tk.Tk):
                                 bias_tl[1], 
                                 bias_center[0], 
                                 bias_tl[1] + paint_size[1], 
-                                fill=tip_label_widget._axis_color[self._btn_value[1]], 
+                                fill=BLW._axis_color[self._btn_value[1]], 
                                 width=1, 
                                 arrow='last', 
                                 arrowshape='%d %d %d'%(paint_size[0]//200, paint_size[0]//100, paint_size[0]//200), 
@@ -523,14 +618,14 @@ class tip_label_widget(tk.Tk):
                                 font=('Arial', max(min(paint_size[0] // 40, 15), 10)), 
                                 tag='axis'
                                 )
-        if nrrd['mask'] is not None:
-            for index, row in nrrd['mask'].iterrows():
-                if row['parent'] in nrrd['mask'].index:
+        if raw['mask'] is not None and self._check_var.get():
+            for index, row in raw['mask'].iterrows():
+                if row['parent'] in raw['mask'].index:
                     self._view.create_line(*tuple([int(ratio * i + j) 
                                                     for i, j in zip(row[list(self._btn_value)], bias_tl)
                                                     ]),
                                             *tuple([int(ratio * i + j) 
-                                                    for i, j in zip(nrrd['mask'].loc[row['parent'], list(self._btn_value)], bias_tl)
+                                                    for i, j in zip(raw['mask'].loc[row['parent'], list(self._btn_value)], bias_tl)
                                                     ]), 
                                             fill='#fb0', 
                                             width=2, 
@@ -608,14 +703,13 @@ class tip_label_widget(tk.Tk):
 
     def _scroll(self, event):
         if len(self._cache) == 0 or \
-            self._load_pop.grab_status() is not None or \
-            event.widget is self.combolist or \
+            event.widget is self._combolist or \
             type(event.widget) == str and 'combobox' in event.widget:
             return
         elif event.num == 4 or event.delta == 120:
-            self._combolist.current(max(self._combolist.current() - 1, 0))
+            self._switch(-1)
         else:
-            self._combolist.current(min(self._combolist.current() + 1, len(self._cache) - 1))
+            self._switch(1)
         self._lf_btn_update()
         self._radio_update()
 
@@ -626,6 +720,9 @@ class tip_label_widget(tk.Tk):
         self._path_v3d = temp
 
     def _switch(self, direction):
+        if 0 <= self._combolist.current() + direction < len(self._cache):
+            self._turn_plane('XY')
+            self._check_var.set(True)
         self._combolist.current(min(max(self._combolist.current() + direction, 0), 
                                     len(self._cache) - 1
                                     )
@@ -642,5 +739,5 @@ class tip_label_widget(tk.Tk):
         self._repaint()
 
 if __name__ == "__main__":
-    app = tip_label_widget()
+    app = BLW()
     app.mainloop()
