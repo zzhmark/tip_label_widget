@@ -94,7 +94,8 @@ class BLW(tk.Tk):
         #object vars
         self._btn_value = 'XY'
         self._radio_var = tk.StringVar()
-        self._check_var = tk.BooleanVar()
+        self._surf_on = tk.BooleanVar()
+        self._axes_on = tk.BooleanVar()
         self._combolist_text = tk.StringVar()
         self._cache = {}
         self._pic_handle = None
@@ -295,11 +296,18 @@ class BLW(tk.Tk):
                                             value='na', 
                                             variable=self._radio_var
                                             )
+        # frame_check = tk.Frame(frame['down'])
         self._check_surf = tk.Checkbutton(frame['down'], 
-                                            text='Show surface', 
+                                            text='Surface', 
                                             state='disabled', 
                                             font=('Arial', scrh//80), 
-                                            variable=self._check_var
+                                            variable=self._surf_on
+                                            )
+        self._check_axes = tk.Checkbutton(frame['down'], 
+                                            text='Axes', 
+                                            state='disabled', 
+                                            font=('Arial', scrh//80), 
+                                            variable=self._axes_on
                                             )
         self._radio['na'].pack(side='right', 
                                 expand='yes', 
@@ -316,7 +324,13 @@ class BLW(tk.Tk):
                                 padx=10, 
                                 pady=10
                                 )
+        # frame_check.pack(side='right', expand='yes')
         self._check_surf.pack(side='right', 
+                                expand='yes', 
+                                padx=10, 
+                                pady=10
+                                )
+        self._check_axes.pack(side='right', 
                                 expand='yes', 
                                 padx=10, 
                                 pady=10
@@ -333,9 +347,11 @@ class BLW(tk.Tk):
         # tracing and binding
         self._combolist_text.trace_add(mode='write', callback=self._repaint)
         self._combolist_text.trace_add(mode='write', callback=self._radio_update)
+        self._combolist_text.trace_add(mode='write', callback=self._check_update)
         self._combolist_text.trace_add(mode='write', callback=self._lf_btn_update)
         self._radio_var.trace_add(mode='write', callback=self._repaint_label)
-        self._check_var.trace_add(mode='write', callback=self._repaint)
+        self._surf_on.trace_add(mode='write', callback=self._repaint)
+        self._axes_on.trace_add(mode='write', callback=self._repaint)
         self._view.bind('<Configure>', self._repaint)
         self.bind('<MouseWheel>', self._scroll)
         self.bind('<Button-4>', self._scroll)
@@ -363,6 +379,10 @@ class BLW(tk.Tk):
         self.bind('J', self._key_label)
         self.bind('K', self._key_label)
         self.bind('L', self._key_label)
+        self.bind('q', self._key_axes)
+        self.bind('Q', self._key_axes)
+        self.bind('e', self._key_surf)
+        self.bind('E', self._key_surf)
 
     @classmethod
     def _about(cls):
@@ -398,7 +418,11 @@ class BLW(tk.Tk):
         pop = type_dialog(self, title,  types)
         self.wait_window(pop)
         return pop._type
-        
+    
+    def _check_update(self, *arg):
+        self._surf_on.set(True)
+        self._axes_on.set(True)
+
     def _display_on_v3d(self):
         if self._combolist_text.get() == '':
             return
@@ -409,13 +433,13 @@ class BLW(tk.Tk):
             try:
                 if self._path_v3d == '':
                     raise
-                os.system(self._path_v3d + ' ' + ano.name)
+                os.system(self._path_v3d + ' "' + ano.name + '"')
             except:
                 try:
-                    os.system('vaa3d ' + ano.name)
+                    os.system('vaa3d "' + ano.name + '"')
                 except:
                     try:
-                        os.system('vaa3d_msvc ' + ano.name)
+                        os.system('vaa3d_msvc "' + ano.name + '"')
                     except:
                         mb.showerror(title='Vaa3D Not Found', message="Vaa3D executable isn't found in either the environment or the path specified.\n"
                                     "Please specify a proper path or add an environment path directing to an executable with a proper name."
@@ -424,6 +448,12 @@ class BLW(tk.Tk):
 
     def _judge(self):
         self._cache[self._combolist_text.get()]['label'] = self._radio_var.get()
+
+    def _key_axes(self, event):
+        if event.state & 5 > 0 or \
+            len(self._cache) == 0:
+            return
+        self._axes_on.set(not self._axes_on.get())
 
     def _key_label(self, event):
         if event.state & 5 > 0 or \
@@ -445,6 +475,12 @@ class BLW(tk.Tk):
         if event.state & 1 == 0 or \
             len(self._cache) == 0:
             self._save_as()
+
+    def _key_surf(self, event):
+        if event.state & 5 > 0 or \
+            len(self._cache) == 0:
+            return
+        self._surf_on.set(not self._surf_on.get())
 
     def _key_v3d(self, event):
         if event.state & 1 == 0 or \
@@ -538,7 +574,6 @@ class BLW(tk.Tk):
         else:
             self._refresh_controls('disabled')
             self._pic_handle = None
-        self._check_var.set(True)
 
     def _radio_update(self, *arg):
         if self._combolist_text.get() != '':
@@ -555,6 +590,7 @@ class BLW(tk.Tk):
         self._radio['na']['state'] = flag
         self._radio['y']['state'] = flag
         self._check_surf['state'] = flag
+        self._check_axes['state'] = flag
         self._menu['file'].entryconfig(1, state=flag)
         self._menu['tool'].entryconfig(1, state=flag)
         self._btn[self._btn_value].state(['pressed', 'disabled'])
@@ -580,45 +616,46 @@ class BLW(tk.Tk):
                                 )
         bias_tl = bias_center[0] - paint_size[0] // 2, \
                     bias_center[1] - paint_size[1] // 2
-        self._view.create_line(bias_tl[0], 
-                                bias_center[1], 
-                                bias_tl[0] + paint_size[0], 
-                                bias_center[1], 
-                                fill=BLW._axis_color[self._btn_value[0]], 
-                                width=1, 
-                                arrow='last', 
-                                arrowshape='%d %d %d'%(paint_size[0]//200, paint_size[0]//100, paint_size[0]//200), 
-                                dash=1, 
-                                tag='axis'
-                                )
-        self._view.create_text(bias_tl[0] + paint_size[0], 
-                                bias_center[1], 
-                                text=self._btn_value[0], 
-                                anchor='ne', 
-                                fill='white', 
-                                font=('Arial', max(min(paint_size[0]//40, 15), 10)), 
-                                tag='axis'
-                                )
-        self._view.create_line(bias_center[0], 
-                                bias_tl[1], 
-                                bias_center[0], 
-                                bias_tl[1] + paint_size[1], 
-                                fill=BLW._axis_color[self._btn_value[1]], 
-                                width=1, 
-                                arrow='last', 
-                                arrowshape='%d %d %d'%(paint_size[0]//200, paint_size[0]//100, paint_size[0]//200), 
-                                dash=1, 
-                                tag='axis'
-                                )
-        self._view.create_text(bias_center[0], 
-                                bias_tl[1] + paint_size[1], 
-                                text=self._btn_value[1], 
-                                anchor='se', 
-                                fill='white', 
-                                font=('Arial', max(min(paint_size[0] // 40, 15), 10)), 
-                                tag='axis'
-                                )
-        if raw['mask'] is not None and self._check_var.get():
+        if self._axes_on.get():
+            self._view.create_line(bias_tl[0], 
+                                    bias_center[1], 
+                                    bias_tl[0] + paint_size[0], 
+                                    bias_center[1], 
+                                    fill=BLW._axis_color[self._btn_value[0]], 
+                                    width=1, 
+                                    arrow='last', 
+                                    arrowshape='%d %d %d'%(paint_size[0]//200, paint_size[0]//100, paint_size[0]//200), 
+                                    dash=1, 
+                                    tag='axis'
+                                    )
+            self._view.create_text(bias_tl[0] + paint_size[0], 
+                                    bias_center[1], 
+                                    text=self._btn_value[0], 
+                                    anchor='ne', 
+                                    fill='white', 
+                                    font=('Arial', max(min(paint_size[0]//40, 15), 10)), 
+                                    tag='axis'
+                                    )
+            self._view.create_line(bias_center[0], 
+                                    bias_tl[1], 
+                                    bias_center[0], 
+                                    bias_tl[1] + paint_size[1], 
+                                    fill=BLW._axis_color[self._btn_value[1]], 
+                                    width=1, 
+                                    arrow='last', 
+                                    arrowshape='%d %d %d'%(paint_size[0]//200, paint_size[0]//100, paint_size[0]//200), 
+                                    dash=1, 
+                                    tag='axis'
+                                    )
+            self._view.create_text(bias_center[0], 
+                                    bias_tl[1] + paint_size[1], 
+                                    text=self._btn_value[1], 
+                                    anchor='se', 
+                                    fill='white', 
+                                    font=('Arial', max(min(paint_size[0] // 40, 15), 10)), 
+                                    tag='axis'
+                                    )
+        if raw['mask'] is not None and self._surf_on.get():
             for index, row in raw['mask'].iterrows():
                 if row['parent'] in raw['mask'].index:
                     self._view.create_line(*tuple([int(ratio * i + j) 
@@ -722,7 +759,6 @@ class BLW(tk.Tk):
     def _switch(self, direction):
         if 0 <= self._combolist.current() + direction < len(self._cache):
             self._turn_plane('XY')
-            self._check_var.set(True)
         self._combolist.current(min(max(self._combolist.current() + direction, 0), 
                                     len(self._cache) - 1
                                     )
