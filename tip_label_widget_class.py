@@ -736,7 +736,7 @@ class BLW(tk.Tk):
         if path.endswith('.csv'):
             df.to_csv(path, sep=' ')
         elif path.endswith('.xls') or path.endswith('.xlsx'):
-            df.to_excel(path, sep=' ')
+            df.to_excel(path)
 
     def _scroll(self, event):
         if len(self._cache) == 0 or \
