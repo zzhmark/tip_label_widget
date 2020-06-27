@@ -734,7 +734,7 @@ class BLW(tk.Tk):
                             columns=['filename', 'label']
                             ).set_index('filename')
         if path.endswith('.csv'):
-            df.to_csv(path, sep=' ')
+            df.to_csv(path, sep=',')
         elif path.endswith('.xls') or path.endswith('.xlsx'):
             df.to_excel(path)
 
